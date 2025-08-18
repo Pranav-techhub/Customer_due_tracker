@@ -1,9 +1,10 @@
+# backend/payments.py
 import razorpay
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from backend.utils import (
     DUES_CSV, TRANSACTIONS_CSV,
-    read_csv, write_csv, append_csv, ensure_headers, log_action
+    read_csv, write_csv, ensure_headers, log_action
 )
 
 payments_bp = Blueprint("payments", __name__)
@@ -50,6 +51,7 @@ def create_order():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @payments_bp.route("/confirm_payment", methods=["POST"])
 def confirm_payment():
     """
@@ -80,10 +82,10 @@ def confirm_payment():
 
     # Record transaction
     ensure_headers(TRANSACTIONS_CSV)
-    append_csv(
-        TRANSACTIONS_CSV,
-        ["date", "username", "customer", "amount", "order_id", "status", "mode"],
-        {
+    with open(TRANSACTIONS_CSV, "a", newline="", encoding="utf-8") as f:
+        import csv
+        writer = csv.DictWriter(f, fieldnames=["date", "username", "customer", "amount", "order_id", "status", "mode"])
+        writer.writerow({
             "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "username": username,
             "customer": customer_name,
@@ -91,8 +93,7 @@ def confirm_payment():
             "order_id": order_id,
             "status": "Success",
             "mode": mode
-        }
-    )
+        })
 
     log_action("payment_success", f"{username} paid {amount} (order {order_id})")
     return jsonify({"success": True, "message": "Payment confirmed, dues updated"}), 200
