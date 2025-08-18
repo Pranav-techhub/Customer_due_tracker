@@ -1,71 +1,58 @@
 import streamlit as st
 import pandas as pd
 import requests
-import hashlib
+import os
 from pathlib import Path
-import random
-import string
 
-# ------------------ Config ------------------
-API_URL = "http://localhost:5000"   # Flask backend
-
+# ----------------- CONFIG -----------------
+API_URL = os.getenv("API_URL", "http://localhost:5000")
 CUSTOMERS_CSV = Path(__file__).parent.parent / "backend" / "data" / "customers.csv"
-DUES_CSV = Path(__file__).parent.parent / "backend" / "data" / "dues.csv"
-TRANSACTIONS_CSV = Path(__file__).parent.parent / "backend" / "data" / "transactions.csv"
 
-OWNER_USERNAME = "owner"
-OWNER_PASSWORD = "owner123"   # example; in real app keep in .env
+st.set_page_config(page_title="Customer Due Tracker", layout="wide")
 
-# ------------------ Helpers ------------------
+# Apply custom CSS for better fonts in light theme
+st.markdown("""
+    <style>
+    body, input, textarea, select, button {
+        font-family: 'Segoe UI', 'Roboto', sans-serif;
+        font-size: 15px !important;
+        color: #111111 !important;
+    }
+    .stSidebar, .css-1d391kg {
+        font-size: 15px !important;
+        font-weight: 500;
+    }
+    h1, h2, h3 {
+        font-weight: 600;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+
+# ----------------- HELPERS -----------------
 def load_customers():
+    if not CUSTOMERS_CSV.exists():
+        return pd.DataFrame(columns=["email", "password", "name", "dues"])
     return pd.read_csv(CUSTOMERS_CSV)
+
 
 def save_customers(df):
     df.to_csv(CUSTOMERS_CSV, index=False)
 
-def load_dues():
-    return pd.read_csv(DUES_CSV)
 
-def save_dues(df):
-    df.to_csv(DUES_CSV, index=False)
+def authenticate_user(username, password, role):
+    if role == "owner":
+        return username == os.getenv("OWNER_USERNAME", "admin") and password == os.getenv("OWNER_PASSWORD", "admin")
+    elif role == "customer":
+        df = load_customers()
+        user = df[(df["email"] == username) & (df["password"] == password)]
+        return not user.empty
+    return False
 
-def load_transactions():
-    return pd.read_csv(TRANSACTIONS_CSV)
 
-def save_transactions(df):
-    df.to_csv(TRANSACTIONS_CSV, index=False)
-
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-def generate_password():
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-
-# ------------------ UI Styling ------------------
-st.markdown(
-    """
-    <style>
-    .stApp { font-family: 'Segoe UI', sans-serif; }
-    h1, h2, h3, h4 { color: #222; font-weight: 600; }
-    .stSidebar { font-size: 16px; }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-# ------------------ Authentication ------------------
-if "role" not in st.session_state:
-    st.session_state.role = None
-if "customer_email" not in st.session_state:
-    st.session_state.customer_email = None
-if "razorpay_keys" not in st.session_state:
-    st.session_state.razorpay_keys = {"mode": "test", "key_id": "", "key_secret": ""}
-
-st.title("💰 Customer Due Tracking System")
-
-# ------------------ Login ------------------
-if st.session_state.role is None:
-    st.subheader("Login")
+# ----------------- LOGIN -----------------
+def login():
+    st.title("🔐 Customer Due Tracking System")
 
     role = st.radio("Login as:", ["Owner", "Customer"])
 
@@ -73,37 +60,89 @@ if st.session_state.role is None:
     password = st.text_input("Password", type="password")
 
     if st.button("Login"):
-        if role == "Owner":
-            if username == OWNER_USERNAME and password == OWNER_PASSWORD:
-                st.session_state.role = "owner"
-                st.success("Owner login successful")
-            else:
-                st.error("Invalid owner credentials")
-        else:  # Customer
-            df = load_customers()
-            user = df[df["email"] == username]
-            if not user.empty:
-                stored_hash = user.iloc[0]["password"]
-                if stored_hash == hash_password(password):
-                    st.session_state.role = "customer"
-                    st.session_state.customer_email = username
-                    st.success("Customer login successful")
-                else:
-                    st.error("Wrong password")
-            else:
-                st.error("No customer with this email found")
+        if authenticate_user(username, password, role.lower()):
+            st.session_state["role"] = role.lower()
+            st.session_state["username"] = username
+            st.session_state["logged_in"] = True
+            st.experimental_rerun()
+        else:
+            st.error("Invalid credentials")
 
-# ------------------ Owner Interface ------------------
-elif st.session_state.role == "owner":
-    st.sidebar.title("Owner Dashboard")
-    menu = st.sidebar.radio("Menu", ["Add Customer", "View Customers", "Manage Dues", "Razorpay Settings"])
+# ----------------- OWNER INTERFACE -----------------
+def owner_dashboard():
+    st.title("👑 Owner Dashboard")
 
-    if menu == "Add Customer":
-        st.subheader("Add New Customer")
-        name = st.text_input("Customer Name")
-        email = st.text_input("Customer Email")
-        if st.button("Create Customer"):
-            if name and email:
+    # Razorpay Keys
+    st.subheader("Razorpay Settings")
+    mode = st.radio("Mode", ["Test", "Live"], horizontal=True)
+    key_id = st.text_input("Razorpay Key ID", type="password")
+    key_secret = st.text_input("Razorpay Key Secret", type="password")
+    if st.button("Save Razorpay Keys"):
+        st.session_state["razorpay"] = {
+            "mode": mode,
+            "key_id": key_id,
+            "key_secret": key_secret
+        }
+        st.success("Razorpay keys saved in session.")
+
+    # Manage Customers
+    st.subheader("Customer Management")
+    df = load_customers()
+    st.dataframe(df)
+
+# ----------------- CUSTOMER INTERFACE -----------------
+def customer_dashboard():
+    df = load_customers()
+    user = df[df["email"] == st.session_state["username"]].iloc[0]
+
+    st.title(f"👤 Welcome {user['name']}")
+
+    # Show dues
+    st.metric("Your Current Due", f"₹{user['dues']}")
+
+    # Payment section
+    st.subheader("💳 Pay Your Due")
+    upi_id = st.text_input("Enter your UPI ID")
+    amount = st.number_input("Amount to Pay", min_value=1, max_value=int(user["dues"]), value=1)
+
+    if st.button("Pay"):
+        if "razorpay" not in st.session_state:
+            st.error("Owner has not configured Razorpay keys yet.")
+        elif not upi_id:
+            st.warning("Enter a valid UPI ID.")
+        else:
+            st.info("Sending payment request...")
+            # In real integration, we call backend Razorpay API here
+            # For now, we simulate success
+            df.loc[df["email"] == user["email"], "dues"] = int(user["dues"]) - amount
+            save_customers(df)
+            st.success(f"Payment of ₹{amount} successful! Your new due is ₹{int(user['dues']) - amount}")
+
+    # Password change
+    st.subheader("🔑 Change Password")
+    old_pwd = st.text_input("Old Password", type="password")
+    new_pwd = st.text_input("New Password", type="password")
+    if st.button("Update Password"):
+        if old_pwd != user["password"]:
+            st.error("Old password is incorrect.")
+        elif not new_pwd.strip():
+            st.error("New password cannot be empty.")
+        else:
+            df.loc[df["email"] == user["email"], "password"] = new_pwd
+            save_customers(df)
+            st.success("Password updated successfully!")
+
+# ----------------- MAIN -----------------
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if not st.session_state["logged_in"]:
+    login()
+else:
+    if st.session_state["role"] == "owner":
+        owner_dashboard()
+    elif st.session_state["role"] == "customer":
+        customer_dashboard()
                 df = load_customers()
                 if email in df["email"].values:
                     st.error("Customer with this email already exists")
