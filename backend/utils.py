@@ -1,3 +1,4 @@
+# backend/utils.py
 import csv
 import re
 import random
@@ -42,18 +43,15 @@ def write_csv(file: Path, fieldnames: list, rows: list):
         writer.writeheader()
         writer.writerows(rows)
 
-def append_csv(file: Path, fieldnames: list, row: dict):
-    rows = read_csv(file)
-    rows.append(row)
-    write_csv(file, fieldnames, rows)
-
 def log_action(action: str, details: str):
     ensure_headers(LOGS_CSV)
-    append_csv(LOGS_CSV, ["timestamp", "action", "details"], {
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "action": action,
-        "details": details
-    })
+    with open(LOGS_CSV, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["timestamp", "action", "details"])
+        writer.writerow({
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "action": action,
+            "details": details
+        })
 
 # ---------- Username & Password ----------
 
