@@ -1,3 +1,4 @@
+# backend/routes.py
 from flask import Blueprint, request, jsonify
 from backend.services import (
     create_customer_account,
@@ -20,6 +21,7 @@ def create_customer():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+
 @routes_bp.route("/change_password", methods=["POST"])
 def change_password():
     data = request.json or {}
@@ -31,6 +33,7 @@ def change_password():
     res = change_password_service(username, old_password, new_password)
     code = 200 if "success" in res else 401
     return jsonify(res), code
+
 
 @routes_bp.route("/record_offline_payment", methods=["POST"])
 def record_offline_payment_api():
