@@ -1,109 +1,225 @@
-import os
-import requests
 import streamlit as st
+import pandas as pd
+import requests
+import hashlib
+from pathlib import Path
+import random
+import string
 
-API_URL = os.getenv("API_URL", "http://localhost:5000/api")
+# ------------------ Config ------------------
+API_URL = "http://localhost:5000"   # Flask backend
 
-st.set_page_config(page_title="Customer Due Tracker", page_icon="💰", layout="centered")
+CUSTOMERS_CSV = Path(__file__).parent.parent / "backend" / "data" / "customers.csv"
+DUES_CSV = Path(__file__).parent.parent / "backend" / "data" / "dues.csv"
+TRANSACTIONS_CSV = Path(__file__).parent.parent / "backend" / "data" / "transactions.csv"
 
-# ---------- Typography only (no background changes) ----------
-st.markdown("""
-<style>
-html, body, [class*="css"]  {
-    font-family: 'Poppins', sans-serif;
-    color: #202020;
-    font-size: 16px;
-}
-h1 { font-size: 2.2rem !important; font-weight: 700; color: #111111; }
-h2 { font-size: 1.8rem !important; font-weight: 600; color: #222222; }
-h3 { font-size: 1.4rem !important; font-weight: 600; color: #333333; }
-</style>
-""", unsafe_allow_html=True)
+OWNER_USERNAME = "owner"
+OWNER_PASSWORD = "owner123"   # example; in real app keep in .env
+
+# ------------------ Helpers ------------------
+def load_customers():
+    return pd.read_csv(CUSTOMERS_CSV)
+
+def save_customers(df):
+    df.to_csv(CUSTOMERS_CSV, index=False)
+
+def load_dues():
+    return pd.read_csv(DUES_CSV)
+
+def save_dues(df):
+    df.to_csv(DUES_CSV, index=False)
+
+def load_transactions():
+    return pd.read_csv(TRANSACTIONS_CSV)
+
+def save_transactions(df):
+    df.to_csv(TRANSACTIONS_CSV, index=False)
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def generate_password():
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+
+# ------------------ UI Styling ------------------
+st.markdown(
+    """
+    <style>
+    .stApp { font-family: 'Segoe UI', sans-serif; }
+    h1, h2, h3, h4 { color: #222; font-weight: 600; }
+    .stSidebar { font-size: 16px; }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# ------------------ Authentication ------------------
+if "role" not in st.session_state:
+    st.session_state.role = None
+if "customer_email" not in st.session_state:
+    st.session_state.customer_email = None
+if "razorpay_keys" not in st.session_state:
+    st.session_state.razorpay_keys = {"mode": "test", "key_id": "", "key_secret": ""}
 
 st.title("💰 Customer Due Tracking System")
 
-# ---------------- Admin Payment Settings ----------------
-st.sidebar.title("⚙️ Admin Settings")
-with st.sidebar.expander("🔑 Payment Configuration", expanded=True):
-    mode = st.radio("Mode", ["Test", "Live"], index=0, horizontal=True)
-    razorpay_key_id = st.text_input("Razorpay Key ID", type="password")
-    razorpay_key_secret = st.text_input("Razorpay Key Secret", type="password")
-    owner_upi_id = st.text_input("Owner UPI ID (destination)")
+# ------------------ Login ------------------
+if st.session_state.role is None:
+    st.subheader("Login")
 
-    if st.button("Save Payment Settings"):
-        if razorpay_key_id and razorpay_key_secret and owner_upi_id:
-            st.session_state["mode"] = mode.lower()
-            st.session_state["razorpay_key_id"] = razorpay_key_id
-            st.session_state["razorpay_key_secret"] = razorpay_key_secret
-            st.session_state["owner_upi_id"] = owner_upi_id
-            st.success(f"✅ Payment settings saved for this session ({mode} Mode)")
-            if st.session_state["mode"] == "test":
-                st.info("🧪 In Test Mode use Razorpay test UPI such as `success@razorpay` to simulate success.")
-        else:
-            st.warning("⚠️ Please fill all fields before saving.")
+    role = st.radio("Login as:", ["Owner", "Customer"])
 
-st.markdown("---")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
 
-# ---------------- Customer: Change Password ----------------
-st.header("🔑 Change Password")
-cp_col1, cp_col2 = st.columns(2)
-with cp_col1:
-    cp_username = st.text_input("Username")
-    cp_old = st.text_input("Old Password", type="password")
-with cp_col2:
-    cp_new = st.text_input("New Password", type="password")
-    if st.button("Update Password"):
-        if cp_username and cp_old and cp_new:
-            try:
-                r = requests.post(f"{API_URL}/change_password", json={
-                    "username": cp_username,
-                    "old_password": cp_old,
-                    "new_password": cp_new
-                })
-                if r.status_code == 200:
-                    st.success("✅ Password updated successfully.")
+    if st.button("Login"):
+        if role == "Owner":
+            if username == OWNER_USERNAME and password == OWNER_PASSWORD:
+                st.session_state.role = "owner"
+                st.success("Owner login successful")
+            else:
+                st.error("Invalid owner credentials")
+        else:  # Customer
+            df = load_customers()
+            user = df[df["email"] == username]
+            if not user.empty:
+                stored_hash = user.iloc[0]["password"]
+                if stored_hash == hash_password(password):
+                    st.session_state.role = "customer"
+                    st.session_state.customer_email = username
+                    st.success("Customer login successful")
                 else:
-                    st.error(r.json().get("error", "Failed"))
-            except Exception as e:
-                st.error(f"Request failed: {e}")
+                    st.error("Wrong password")
+            else:
+                st.error("No customer with this email found")
+
+# ------------------ Owner Interface ------------------
+elif st.session_state.role == "owner":
+    st.sidebar.title("Owner Dashboard")
+    menu = st.sidebar.radio("Menu", ["Add Customer", "View Customers", "Manage Dues", "Razorpay Settings"])
+
+    if menu == "Add Customer":
+        st.subheader("Add New Customer")
+        name = st.text_input("Customer Name")
+        email = st.text_input("Customer Email")
+        if st.button("Create Customer"):
+            if name and email:
+                df = load_customers()
+                if email in df["email"].values:
+                    st.error("Customer with this email already exists")
+                else:
+                    password = generate_password()
+                    new_row = pd.DataFrame([{"name": name, "email": email, "password": hash_password(password)}])
+                    df = pd.concat([df, new_row], ignore_index=True)
+                    save_customers(df)
+                    st.success(f"Customer created. Username = {email}, Password = {password}")
+            else:
+                st.error("All fields required")
+
+    elif menu == "View Customers":
+        st.subheader("All Customers")
+        st.dataframe(load_customers())
+
+    elif menu == "Manage Dues":
+        st.subheader("Manage Dues")
+        df = load_dues()
+        st.dataframe(df)
+
+    elif menu == "Razorpay Settings":
+        st.subheader("Razorpay API Keys")
+        mode = st.radio("Mode", ["test", "live"])
+        key_id = st.text_input("Key ID", value=st.session_state.razorpay_keys.get("key_id", ""))
+        key_secret = st.text_input("Key Secret", value=st.session_state.razorpay_keys.get("key_secret", ""), type="password")
+
+        if st.button("Save Keys"):
+            st.session_state.razorpay_keys = {"mode": mode, "key_id": key_id, "key_secret": key_secret}
+            st.success("Razorpay keys saved for session")
+
+# ------------------ Customer Interface ------------------
+elif st.session_state.role == "customer":
+    st.sidebar.title("Customer Dashboard")
+    menu = st.sidebar.radio("Menu", ["My Dues", "Pay Due", "Transactions", "Change Password"])
+
+    if menu == "My Dues":
+        st.subheader("My Dues")
+        df = load_dues()
+        my_dues = df[df["email"] == st.session_state.customer_email]
+        if not my_dues.empty:
+            st.dataframe(my_dues)
         else:
-            st.warning("Please complete all fields.")
+            st.info("No dues found")
 
-st.markdown("---")
+    elif menu == "Pay Due":
+        st.subheader("Pay Dues")
+        df_dues = load_dues()
+        my_due = df_dues[df_dues["email"] == st.session_state.customer_email]
+        if not my_due.empty:
+            amount_due = my_due.iloc[0]["amount"]
+            st.write(f"Your current due: ₹{amount_due}")
 
-# ---------------- Customer: Make a Payment ----------------
-st.header("💳 Make a Payment")
-username = st.text_input("Your Username")
-customer_name = st.text_input("Your Registered Name")
-amount = st.number_input("Amount to pay (INR)", min_value=1, step=1)
+            pay_amount = st.number_input("Enter amount to pay", min_value=1, max_value=int(amount_due), value=int(amount_due))
+            upi_id = st.text_input("Enter your UPI ID")
 
-if st.button("Pay Now"):
-    # Validate owner settings
-    required = ("mode" in st.session_state and
-                "razorpay_key_id" in st.session_state and
-                "razorpay_key_secret" in st.session_state and
-                "owner_upi_id" in st.session_state)
+            if st.button("Pay Now"):
+                keys = st.session_state.razorpay_keys
+                if not keys["key_id"] or not keys["key_secret"]:
+                    st.error("Owner has not configured Razorpay keys")
+                else:
+                    try:
+                        response = requests.post(
+                            f"{API_URL}/payments/create",
+                            json={
+                                "key_id": keys["key_id"],
+                                "key_secret": keys["key_secret"],
+                                "amount": pay_amount,
+                                "upi_id": upi_id
+                            }
+                        ).json()
 
-    if not required:
-        st.error("❌ Owner has not configured payment settings yet.")
-    elif not (username and customer_name and amount > 0):
-        st.error("❌ Please enter username, registered name, and amount.")
-    else:
-        payload = {
-            "amount": amount,
-            "mode": st.session_state["mode"],
-            "key_id": st.session_state["razorpay_key_id"],
-            "key_secret": st.session_state["razorpay_key_secret"],
-            "upi_id": st.session_state["owner_upi_id"],
-            "customer_name": customer_name,
-            "username": username
-        }
-        try:
-            r = requests.post(f"{API_URL}/create_order", json=payload)
-            if r.status_code == 200:
-                order = r.json()
-                st.success(f"✅ Order created: {order['order_id']}")
-                if st.session_state["mode"] == "test":
+                        if response.get("success"):
+                            st.success("Payment successful via Razorpay")
+
+                            # Update due
+                            df_dues.loc[df_dues["email"] == st.session_state.customer_email, "amount"] -= pay_amount
+                            save_dues(df_dues)
+
+                            # Log transaction
+                            df_txn = load_transactions()
+                            new_txn = pd.DataFrame([{
+                                "email": st.session_state.customer_email,
+                                "amount": pay_amount,
+                                "method": "UPI",
+                                "status": "Paid"
+                            }])
+                            df_txn = pd.concat([df_txn, new_txn], ignore_index=True)
+                            save_transactions(df_txn)
+                        else:
+                            st.error(f"Payment failed: {response.get('error')}")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+    elif menu == "Transactions":
+        st.subheader("My Transactions")
+        df = load_transactions()
+        my_txns = df[df["email"] == st.session_state.customer_email]
+        if not my_txns.empty:
+            st.dataframe(my_txns)
+        else:
+            st.info("No transactions found")
+
+    elif menu == "Change Password":
+        st.subheader("Change My Password")
+        old_pw = st.text_input("Old Password", type="password")
+        new_pw = st.text_input("New Password", type="password")
+        if st.button("Update Password"):
+            df = load_customers()
+            user = df[df["email"] == st.session_state.customer_email]
+            if not user.empty and user.iloc[0]["password"] == hash_password(old_pw):
+                df.loc[df["email"] == st.session_state.customer_email, "password"] = hash_password(new_pw)
+                save_customers(df)
+                st.success("Password updated successfully")
+            else:
+                st.error("Old password is incorrect")
                     st.info("🧪 Use test UPI like `success@razorpay` in Razorpay’s test flow to simulate success.")
 
                 # Simulated confirmation for testing (replace with webhook in prod)
