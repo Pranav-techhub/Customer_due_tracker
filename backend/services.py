@@ -1,11 +1,12 @@
-from pathlib import Path
+# backend/services.py
 from typing import Tuple
 from backend.utils import (
-    CUSTOMERS_CSV, DUES_CSV, LOGS_CSV,
-    read_csv, write_csv, append_csv, log_action,
+    CUSTOMERS_CSV, DUES_CSV,
+    read_csv, write_csv, log_action,
     generate_unique_username, generate_random_password
 )
 from backend.notifications.email_service import send_email
+
 
 def create_customer_account(name: str, email: str, phone: str) -> Tuple[str, str]:
     if not name:
@@ -34,11 +35,16 @@ def create_customer_account(name: str, email: str, phone: str) -> Tuple[str, str
 
     # optional email
     if email:
-        send_email(email, "Your Account Details",
-                   f"<p>Hello {name},</p><p>Your account has been created.</p>"
-                   f"<p><b>Username:</b> {username}<br><b>Password:</b> {password}</p>")
+        send_email(
+            email,
+            "Your Account Details",
+            f"<p>Hello {name},</p>"
+            f"<p>Your account has been created.</p>"
+            f"<p><b>Username:</b> {username}<br><b>Password:</b> {password}</p>"
+        )
 
     return username, password
+
 
 def change_password_service(username: str, old_password: str, new_password: str):
     customers = read_csv(CUSTOMERS_CSV)
@@ -55,8 +61,8 @@ def change_password_service(username: str, old_password: str, new_password: str)
     log_action("change_password", f"{username} changed password")
     return {"success": True, "message": "Password updated"}
 
+
 def record_offline_payment(username: str, customer: str, amount: float):
-    from backend.utils import DUES_CSV
     if amount <= 0:
         return {"error": "Invalid amount"}
 
