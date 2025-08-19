@@ -148,6 +148,51 @@ elif st.session_state.role == "customer":
     elif choice == "Logout":
         st.session_state.role = None
         st.session_state.user_email = None
+        st.experimental_rerun()
+elif st.session_state.role == "customer":
+    menu = ["My Dues", "Make Payment", "Transactions", "Change Password", "Logout"]
+    choice = st.sidebar.selectbox("Menu", menu)
+
+    if choice == "My Dues":
+        st.subheader("My Dues")
+        df_dues = load_dues()
+        my_dues = df_dues[df_dues["email"] == st.session_state.user_email]
+        st.dataframe(my_dues)
+
+    elif choice == "Make Payment":
+        st.subheader("Pay Due")
+        df_dues = load_dues()
+        my_dues = df_dues[df_dues["email"] == st.session_state.user_email]
+        if not my_dues.empty:
+            amount = st.number_input("Enter Amount", min_value=0.0, step=0.1)
+            if st.button("Pay"):
+                resp = record_payment(my_dues.iloc[0]["customer_id"], amount)
+                if resp.status_code == 200:
+                    st.success("Payment recorded successfully!")
+                else:
+                    st.error("Payment failed")
+        else:
+            st.info("No dues available")
+
+    elif choice == "Transactions":
+        st.subheader("My Transactions")
+        df = load_transactions()
+        my_txns = df[df["email"] == st.session_state.user_email]
+        st.dataframe(my_txns)
+
+    elif choice == "Change Password":
+        st.subheader("Change Password")
+        new_pass = st.text_input("New Password", type="password")
+        if st.button("Update Password"):
+            resp = change_customer_password(st.session_state.user_email, new_pass)
+            if resp.status_code == 200:
+                st.success("Password updated successfully!")
+            else:
+                st.error("Failed to update password")
+
+    elif choice == "Logout":
+        st.session_state.role = None
+        st.session_state.user_email = None
         st.experimental_rerun()                if st.session_state["mode"] == "test":
                     st.info("🧪 Use test UPI like `success@razorpay` in Razorpay’s test flow to simulate success.")
 
