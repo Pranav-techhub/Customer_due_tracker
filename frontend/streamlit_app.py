@@ -131,8 +131,7 @@ with st.expander("ℹ️ How to test payments"):
 - Set **Mode = Test** and save your **Test Key ID/Secret** and **Owner UPI**.
 - Click **Pay Now** with any amount.
 - This demo calls `/confirm_payment` right away to simulate success and update dues.
-- For production, set up **Razorpay Webhooks** and only update dues after authenticating the webhook signature.
-""")elif st.session_state.role == "customer":
+- For production, set up **Razorpay Webhooks** and only update dues after authenticating the webhook signature.""")elif st.session_state.role == "customer":
     menu = ["My Dues", "Make Payment", "Transactions", "Change Password", "Logout"]
     choice = st.sidebar.selectbox("Menu", menu)
 
